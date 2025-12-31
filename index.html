@@ -37,7 +37,8 @@ Retrieved 2025-12-31, License - CC BY-SA 4.0
     <script>
         const u = new URL(location.href);
         const v = u.searchParams.get('v');
-        const base = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(v || '');
+        const t = u.searchParams.get('t');
+        const base = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(v || '') + (t ? '?start=' + encodeURIComponent(t) : '');
         const params = new URLSearchParams({
             enablejsapi: '1',
             rel: '0',
