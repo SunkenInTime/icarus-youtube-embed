@@ -36,19 +36,91 @@ Retrieved 2025-12-31, License - CC BY-SA 4.0
 
     <script>
         const u = new URL(location.href);
-        const v = u.searchParams.get('v');
-        const t = u.searchParams.get('t');
-        const base = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(v || '') + (t ? '?start=' + encodeURIComponent(t) : '');
+        function parseTimeToSeconds(input) {
+            if (!input) return null;
+            const s = String(input).trim();
+            if (!s) return null;
+
+            // "90" / "90s"
+            if (/^\d+(\.\d+)?s?$/i.test(s)) return Math.floor(Number(s));
+
+            // "1:30" / "01:02:03"
+            if (/^\d{1,2}:\d{1,2}(:\d{1,2})?$/.test(s)) {
+                const parts = s.split(':').map((n) => Number(n));
+                if (parts.some((n) => Number.isNaN(n))) return null;
+                let seconds = 0;
+                for (const p of parts) seconds = seconds * 60 + p;
+                return Math.floor(seconds);
+            }
+
+            // "1h2m3s" / "2m" / "45s"
+            const m = s.match(/^(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?$/i);
+            if (m) {
+                const h = m[1] ? Number(m[1]) : 0;
+                const min = m[2] ? Number(m[2]) : 0;
+                const sec = m[3] ? Number(m[3]) : 0;
+                const total = h * 3600 + min * 60 + sec;
+                if (total > 0) return Math.floor(total);
+            }
+
+            return null;
+        }
+
+        function extractVideoIdAndTime(value) {
+            // Returns { videoId, time } where time can be null or a raw string.
+            if (!value) return { videoId: null, time: null };
+            const raw = String(value).trim();
+            if (!raw) return { videoId: null, time: null };
+
+            // If they passed a full URL (e.g. https://youtu.be/... or https://www.youtube.com/watch?v=...&t=...)
+            if (/^https?:\/\//i.test(raw)) {
+                try {
+                    const yu = new URL(raw);
+                    const host = yu.hostname.replace(/^www\./i, '').toLowerCase();
+                    let videoId = null;
+
+                    if (host === 'youtu.be') {
+                        videoId = yu.pathname.replace(/^\//, '').split('/')[0] || null;
+                    } else if (host.endsWith('youtube.com')) {
+                        videoId = yu.searchParams.get('v') || null;
+                        if (!videoId) {
+                            const mm = yu.pathname.match(/\/embed\/([^/?#]+)/i);
+                            if (mm) videoId = mm[1];
+                        }
+                    }
+
+                    // time can be in ?t=, ?start=, or #t=
+                    const time = yu.searchParams.get('t') || yu.searchParams.get('start') || (yu.hash || '').replace(/^#t=/i, '') || null;
+                    return { videoId, time };
+                } catch {
+                    // Fall through: treat as non-URL
+                }
+            }
+
+            // Otherwise assume it's already a video id.
+            return { videoId: raw, time: null };
+        }
+
+        const explicitT = u.searchParams.get('t') || u.searchParams.get('start');
+        const vOrUrl = u.searchParams.get('v') || u.searchParams.get('url');
+        const extracted = extractVideoIdAndTime(vOrUrl);
+        const videoId = extracted.videoId;
+        const timeRaw = explicitT || extracted.time;
+        const startSeconds = parseTimeToSeconds(timeRaw);
+        const base = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(videoId || '');
         const params = new URLSearchParams({
             enablejsapi: '1',
             rel: '0',
             modestbranding: '1',
             playsinline: u.searchParams.get('playsinline') || '1',
-            autoplay: u.searchParams.get('autoplay') || '0',
+            autoplay: u.searchParams.get('autoplay') || '1',
             origin: location.origin
+
         });
-        if (!v) document.body.textContent = 'Missing ?v=VIDEO_ID';
-        else document.getElementById('player').src = `${base}?${params}`;
+        if (startSeconds !== null) params.set('start', String(startSeconds));
+
+        if (!videoId) document.body.textContent = 'Missing ?v=VIDEO_ID (or ?url=YOUTUBE_LINK)';
+        else document.getElementById('player').src = `${base}?${params.toString()}`;
     </script>
 </body>
 
