@@ -20,12 +20,48 @@ Retrieved 2025-12-31, License - CC BY-SA 4.0
             background: #000;
         }
 
+        body {
+            overflow: hidden;
+        }
+
+        #player,
+        #player iframe {
+            width: 100vw !important;
+            height: 100vh !important;
+            border: 0;
+            display: block;
+            background: #000;
+        }
+
+        #message {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            color: #fff;
+            font: 16px/1.4 system-ui, sans-serif;
+            text-align: center;
+        }
+
     </style>
 </head>
 
 <body>
+    <div id="message"></div>
+    <iframe
+        id="player"
+        title="YouTube video player"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowfullscreen
+        referrerpolicy="strict-origin-when-cross-origin"></iframe>
     <script>
         const u = new URL(location.href);
+        const iframe = document.getElementById('player');
+        const message = document.getElementById('message');
+        let player = null;
+
         function parseTimeToSeconds(input) {
             if (!input) return null;
             const s = String(input).trim();
@@ -77,6 +113,10 @@ Retrieved 2025-12-31, License - CC BY-SA 4.0
                             const mm = yu.pathname.match(/\/embed\/([^/?#]+)/i);
                             if (mm) videoId = mm[1];
                         }
+                        if (!videoId) {
+                            const shortsMatch = yu.pathname.match(/\/shorts\/([^/?#]+)/i);
+                            if (shortsMatch) videoId = shortsMatch[1];
+                        }
                     }
 
                     // time can be in ?t=, ?start=, or #t=
@@ -91,23 +131,99 @@ Retrieved 2025-12-31, License - CC BY-SA 4.0
             return { videoId: raw, time: null };
         }
 
+        function getPreferredQuality(rawQuality) {
+            const quality = String(rawQuality || '').trim().toLowerCase();
+            if (!quality) return 'highres';
+            if (quality === 'highest') return 'highres';
+            if (quality === '2160p' || quality === '4k') return 'highres';
+            if (quality === '1440p') return 'hd1440';
+            if (quality === '1080p') return 'hd1080';
+            if (quality === '720p') return 'hd720';
+            return quality;
+        }
+
+        function getPlayerSize() {
+            const viewportWidth = Math.max(window.innerWidth || 0, document.documentElement.clientWidth || 0, 1);
+            const viewportHeight = Math.max(window.innerHeight || 0, document.documentElement.clientHeight || 0, 1);
+            const pixelRatio = Math.max(1, window.devicePixelRatio || 1);
+
+            // YouTube quality is adaptive. A larger embed surface is the most
+            // plausible signal still available for encouraging higher quality.
+            return {
+                width: Math.max(1280, Math.ceil(viewportWidth * pixelRatio)),
+                height: Math.max(720, Math.ceil(viewportHeight * pixelRatio)),
+            };
+        }
+
+        function setMessage(text) {
+            message.textContent = text;
+            message.style.display = 'flex';
+            iframe.style.display = 'none';
+        }
+
+        function updatePlayerSize() {
+            const size = getPlayerSize();
+            iframe.width = String(size.width);
+            iframe.height = String(size.height);
+
+            if (player && typeof player.setSize === 'function') {
+                player.setSize(size.width, size.height);
+            }
+        }
+
+        function buildEmbedUrl(videoId, startSeconds) {
+            const quality = getPreferredQuality(u.searchParams.get('quality') || u.searchParams.get('vq'));
+            const params = new URLSearchParams({
+                autoplay: u.searchParams.get('autoplay') || '1',
+                controls: u.searchParams.get('controls') || '1',
+                enablejsapi: '1',
+                fs: u.searchParams.get('fs') || '1',
+                hd: '1',
+                modestbranding: '1',
+                origin: location.origin,
+                playsinline: u.searchParams.get('playsinline') || '1',
+                rel: '0',
+                vq: quality,
+            });
+
+            if (startSeconds !== null) params.set('start', String(startSeconds));
+
+            return `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?${params.toString()}`;
+        }
+
+        function loadYouTubeApi() {
+            const tag = document.createElement('script');
+            tag.src = 'https://www.youtube.com/iframe_api';
+            tag.async = true;
+            document.head.appendChild(tag);
+        }
+
         const explicitT = u.searchParams.get('t') || u.searchParams.get('start');
         const vOrUrl = u.searchParams.get('v') || u.searchParams.get('url');
         const extracted = extractVideoIdAndTime(vOrUrl);
         const videoId = extracted.videoId;
         const timeRaw = explicitT || extracted.time;
         const startSeconds = parseTimeToSeconds(timeRaw);
-        const base = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(videoId || '');
-        const params = new URLSearchParams({
-            rel: '0',
-            modestbranding: '1',
-            playsinline: u.searchParams.get('playsinline') || '1',
-            autoplay: '1',
-        });
-        if (startSeconds !== null) params.set('start', String(startSeconds));
 
-        if (!videoId) document.body.textContent = 'Missing ?v=VIDEO_ID (or ?url=YOUTUBE_LINK)';
-        else location.replace(`${base}?${params.toString()}`);
+        if (!videoId) {
+            setMessage('Missing ?v=VIDEO_ID (or ?url=YOUTUBE_LINK)');
+        } else {
+            updatePlayerSize();
+            iframe.src = buildEmbedUrl(videoId, startSeconds);
+            loadYouTubeApi();
+        }
+
+        window.onYouTubeIframeAPIReady = function onYouTubeIframeAPIReady() {
+            if (!videoId || !window.YT || !window.YT.Player) return;
+
+            player = new window.YT.Player('player', {
+                events: {
+                    onReady: updatePlayerSize,
+                },
+            });
+        };
+
+        window.addEventListener('resize', updatePlayerSize);
     </script>
 </body>
 
